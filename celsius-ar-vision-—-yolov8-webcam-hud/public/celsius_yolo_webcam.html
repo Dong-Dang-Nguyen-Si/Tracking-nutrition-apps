@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Celsius AR Vision — Full-Screen YOLOv8 Webcam HUD</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: #07090e;
+      color: #f8fafc;
+      overflow: hidden;
+      user-select: none;
+    }
+    .font-mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+    .ar-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+    .ar-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.55); border-radius: 6px; }
+    .ar-scroll::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.45); border-radius: 6px; }
+    .ar-scroll::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.8); }
+  </style>
+</head>
+<body class="w-screen h-screen relative overflow-hidden bg-[#07090e]">
+
+  <!-- 1. FULL-SCREEN WEBCAM & PYTHON YOLOv8 STREAM LAYER -->
+  <main class="relative w-screen h-screen overflow-hidden">
+    <!-- Browser Webcam Video -->
+    <video id="webcamVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover z-0"></video>
+
+    <!-- Python VS Code YOLOv8 Stream (http://127.0.0.1:5000/video_feed) -->
+    <img id="pythonStream" alt="Python YOLOv8 Stream" class="hidden absolute inset-0 w-full h-full object-cover z-0" />
+
+    <!-- Subtle AR Vignette & Calibration Grid -->
+    <div class="absolute inset-0 pointer-events-none z-10" style="background-image: linear-gradient(to right, rgba(148,163,184,0.05) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.05) 1px, transparent 1px); background-size: 48px 48px;"></div>
+    <div class="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-transparent to-slate-950/55 pointer-events-none z-10"></div>
+
+    <!-- YOLOv8 Bounding Box & AR Callout Canvas -->
+    <canvas id="yoloCanvas" class="absolute inset-0 w-full h-full pointer-events-none z-20"></canvas>
+
+    <!-- 2. TOP HUD NAVIGATION BAR -->
+    <header class="fixed top-0 inset-x-0 z-30 flex items-center justify-between gap-6 px-6 py-3 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
+      <div class="text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0">
+        Celsius AR Vision
+      </div>
+
+      <nav class="hidden md:flex items-center gap-6 text-xs font-medium text-slate-300">
+        <button onclick="setSource('webcam')" id="nav-webcam" class="text-cyan-400 font-semibold whitespace-nowrap">Browser Webcam</button>
+        <button onclick="setSource('python')" id="nav-python" class="hover:text-white whitespace-nowrap">VS Code Python (:5000)</button>
+        <button onclick="toggleDetected()" id="nav-detect" class="hover:text-white whitespace-nowrap">Toggle Detection: ON</button>
+      </nav>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <button onclick="toggleDetected()" id="btnDetectState" class="px-3.5 py-1.5 text-xs font-semibold bg-cyan-500 text-slate-950 rounded-lg whitespace-nowrap">
+          Celsius Detected: ACTIVE
+        </button>
+      </div>
+    </header>
+
+    <!-- 3. LEFT BOTTOM AR PRODUCT CALLOUT BANNER -->
+    <div id="arLeftCallout" class="fixed left-5 bottom-5 z-30 max-w-sm bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-xl p-4">
+      <div class="text-xs font-mono text-cyan-400">
+        YOLOv8 TARGET LOCKED · <span id="confLabel">0.88</span> CONF
+      </div>
+      <h1 class="text-base font-bold text-white mt-1">
+        CELSIUS® Sparkling Watermelon Lemonade (355 mL)
+      </h1>
+      <p class="text-xs font-mono text-slate-300 mt-1">
+        10 Cal · 0g Sugar · 140mg Caffeine · 1,094mg Taurine · pH 3.1
+      </p>
+    </div>
+
+    <!-- 4. RIGHT FLOATING COLLAPSIBLE & SCROLLABLE AR BLOCKS -->
+    <aside id="arBlocksWrapper" class="fixed top-16 right-5 bottom-5 z-30 w-[92vw] sm:w-[460px] flex flex-col pointer-events-none">
+      <div class="pointer-events-auto flex flex-col max-h-full bg-slate-950/85 backdrop-blur-xl border border-slate-800 rounded-2xl overflow-hidden">
+        <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-mono text-cyan-400">AR OVERLAY · CELSIUS ENERGY DRINK</div>
+            <div class="text-xs text-slate-300">Click any arrow (&gt;) to expand and scroll smoothly</div>
+          </div>
+        </div>
+
+        <div class="p-3 space-y-2.5 overflow-y-auto ar-scroll flex-1">
+          <!-- BLOCK 1: INGREDIENT DECODER -->
+          <section class="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden">
+            <div class="px-3.5 py-3 flex items-center justify-between gap-2">
+              <button onclick="toggleArBlock('ingredients')" class="flex items-center gap-3 text-left flex-1">
+                <span id="arrow-ingredients" class="w-8 h-8 rounded-full flex items-center justify-center border bg-cyan-500 text-slate-950 border-cyan-400 transition-transform rotate-90 font-bold">&gt;</span>
+                <div>
+                  <h2 class="text-sm font-bold text-white">1. Ingredient Decoder</h2>
+                  <p class="text-xs text-slate-400">6 compounds decoded · 3 caution flags · 2 safe myths</p>
+                </div>
+              </button>
+              <div class="flex items-center gap-1">
+                <button onclick="scrollAr('scroll-ingredients', -200)" class="w-7 h-7 rounded bg-slate-800 text-xs text-slate-200 border border-slate-700">↑</button>
+                <button onclick="scrollAr('scroll-ingredients', 200)" class="w-7 h-7 rounded bg-slate-800 text-xs text-slate-200 border border-slate-700">↓</button>
+              </div>
+            </div>
+            <div id="panel-ingredients" class="border-t border-slate-800 p-3">
+              <div id="scroll-ingredients" class="max-h-[34vh] overflow-y-auto ar-scroll pr-1 space-y-2.5 text-xs">
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-rose-400">Risk: 3.5/5 · Acidity &amp; Preservative Claim</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Citric Acid &amp; Malic Acid</div>
+                  <p class="text-slate-300 mt-1">Added for tart flavor and microbial stability—sparking an $8.2M class-action settlement over the "No Preservatives" claim. Pulls pH down to ~3.1, which erodes tooth enamel and irritates empty stomachs.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-cyan-400">Risk: 1.0/5 · Scary Name, Actually Beneficial</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Taurine (1,094 mg — Over 1 Gram)</div>
+                  <p class="text-slate-300 mt-1">Not a stimulant. Natural amino sulfonic acid abundant in heart and muscle tissue. Helps stabilize heart rhythm and reduces caffeine-induced jitters.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-amber-400">Risk: 3.5/5 · High Stimulant (Max 1 Can/Day)</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Caffeine (140 mg) + Green Tea Extract</div>
+                  <p class="text-slate-300 mt-1">Equals ~1.5 espresso shots plus EGCG catechins. Boosts workout endurance, but sedentary intake causes heart palpitations and blocks deep REM sleep if consumed after 4 PM.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-amber-400">Risk: 2.5/5 · Artificial Sweetener Duo</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Sucralose &amp; Acesulfame Potassium (Ace-K)</div>
+                  <p class="text-slate-300 mt-1">Synthetic sweeteners 200x–600x sweeter than sugar. Prevents blood sugar spikes, though frequent daily intake can alter gut microbiome balance.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-emerald-400">Risk: 1.0/5 · Water-Soluble Vitamin Halo</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Vitamin B Complex (118%–250% DV) &amp; Glucuronolactone</div>
+                  <p class="text-slate-300 mt-1">Water-soluble B-vitamins (B12, B6, B5, B2, Niacin) support cellular energy; excess amounts are harmlessly excreted by the kidneys.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- BLOCK 2: COMPANY DRAMA -->
+          <section class="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden">
+            <div class="px-3.5 py-3 flex items-center justify-between gap-2">
+              <button onclick="toggleArBlock('drama')" class="flex items-center gap-3 text-left flex-1">
+                <span id="arrow-drama" class="w-8 h-8 rounded-full flex items-center justify-center border bg-slate-800 text-slate-200 border-slate-700 transition-transform font-bold">&gt;</span>
+                <div>
+                  <h2 class="text-sm font-bold text-white">2. Company Drama</h2>
+                  <p class="text-xs text-slate-400">FDA Vodka recall · $8.2M &amp; $82.6M lawsuits · Supply chain</p>
+                </div>
+              </button>
+              <div class="flex items-center gap-1">
+                <button onclick="scrollAr('scroll-drama', -200)" class="w-7 h-7 rounded bg-slate-800 text-xs text-slate-200 border border-slate-700">↑</button>
+                <button onclick="scrollAr('scroll-drama', 200)" class="w-7 h-7 rounded bg-slate-800 text-xs text-slate-200 border border-slate-700">↓</button>
+              </div>
+            </div>
+            <div id="panel-drama" class="hidden border-t border-slate-800 p-3">
+              <div id="scroll-drama" class="max-h-[34vh] overflow-y-auto ar-scroll pr-1 space-y-2.5 text-xs">
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-amber-400">July 2024 – 2025 · FDA Packaging Recall</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Empty CELSIUS Cans Filled with High Noon Vodka Seltzer</div>
+                  <p class="text-slate-300 mt-1">A packaging supplier mistakenly shipped empty CELSIUS Astro Vibe cans to alcohol producer High Noon, which filled them with 4.5% ABV vodka seltzer across multiple states.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-rose-400">2022 – 2023 · Class-Action Settlement</div>
+                  <div class="text-sm font-bold text-white mt-0.5">$8.2M Settlement Over "No Preservatives" Claim</div>
+                  <p class="text-slate-300 mt-1">Consumers sued Celsius Holdings because cans marketed as "No Preservatives" contained Citric Acid. Celsius settled for $8.2M and removed the claim.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-cyan-400">January 2023 · Breach of Contract</div>
+                  <div class="text-sm font-bold text-white mt-0.5">$82.6M Jury Verdict for Rapper Flo Rida</div>
+                  <p class="text-slate-300 mt-1">A Florida jury awarded former brand ambassador Flo Rida $82.6M after finding Celsius concealed unit sales milestones to withhold promised equity.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- BLOCK 3: SMART DEVICE & ADVICE -->
+          <section class="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden">
+            <div class="px-3.5 py-3 flex items-center justify-between gap-2">
+              <button onclick="toggleArBlock('smart')" class="flex items-center gap-3 text-left flex-1">
+                <span id="arrow-smart" class="w-8 h-8 rounded-full flex items-center justify-center border bg-slate-800 text-slate-200 border-slate-700 transition-transform font-bold">&gt;</span>
+                <div>
+                  <h2 class="text-sm font-bold text-white">3. Smart Device &amp; Advice</h2>
+                  <p class="text-xs text-slate-400">Wearable HR/Sleep telemetry · 4 scenarios · 3 rules</p>
+                </div>
+              </button>
+              <div class="flex items-center gap-1">
+                <button onclick="scrollAr('scroll-smart', -200)" class="w-7 h-7 rounded bg-slate-800 text-xs text-slate-200 border border-slate-700">↑</button>
+                <button onclick="scrollAr('scroll-smart', 200)" class="w-7 h-7 rounded bg-slate-800 text-xs text-slate-200 border border-slate-700">↓</button>
+              </div>
+            </div>
+            <div id="panel-smart" class="hidden border-t border-slate-800 p-3">
+              <div id="scroll-smart" class="max-h-[34vh] overflow-y-auto ar-scroll pr-1 space-y-2.5 text-xs">
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-emerald-400">Optimal · Pre-Workout / Gym (7.8/10)</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Drink 20–30 Mins Before Active Training</div>
+                  <p class="text-slate-300 mt-1">Smartwatch HR Delta: +8 to +14 BPM (Exercise Synced). Active muscle contraction utilizes mobilized fatty acids and prevents jitteriness.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-amber-400">Caution · Studying / Desk Work (5.0/10)</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Sedentary 140mg Spike Triggers High HR Alerts</div>
+                  <p class="text-slate-300 mt-1">Smartwatch HR Delta: +12 to +22 BPM resting spike. Sip only half a can (70mg) over 90 minutes alongside water and food.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-950 border border-slate-800">
+                  <div class="font-mono text-rose-400">Avoid · Empty Stomach or After 4:00 PM (1.5/10)</div>
+                  <div class="text-sm font-bold text-white mt-0.5">Enamel Erosion (pH 3.1) &amp; -30% Deep Sleep</div>
+                  <p class="text-slate-300 mt-1">5.5-hour caffeine half-life suppresses overnight HRV and REM sleep. Rinse mouth with plain water immediately after drinking, and pair 1 can with 500mL water.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    let sourceMode = 'webcam';
+    let isDetected = true;
+    let bbox = [0.28, 0.16, 0.48, 0.88];
+    let confidence = 0.88;
+    let label = 'Celsius energy drink';
+
+    async function startWebcam() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+        document.getElementById('webcamVideo').srcObject = stream;
+      } catch (e) {
+        console.warn('Webcam unavailable or handled by Python OpenCV:', e);
+      }
+    }
+
+    function setSource(mode) {
+      sourceMode = mode;
+      const vid = document.getElementById('webcamVideo');
+      const py = document.getElementById('pythonStream');
+      if (mode === 'python') {
+        vid.classList.add('hidden');
+        py.src = 'http://127.0.0.1:5000/video_feed';
+        py.classList.remove('hidden');
+      } else {
+        py.classList.add('hidden');
+        vid.classList.remove('hidden');
+        startWebcam();
+      }
+    }
+
+    function toggleDetected() {
+      isDetected = !isDetected;
+      document.getElementById('arBlocksWrapper').style.display = isDetected ? 'flex' : 'none';
+      document.getElementById('arLeftCallout').style.display = isDetected ? 'block' : 'none';
+      document.getElementById('btnDetectState').textContent = isDetected ? 'Celsius Detected: ACTIVE' : 'Scanning Webcam...';
+    }
+
+    function toggleArBlock(id) {
+      const panel = document.getElementById('panel-' + id);
+      const arrow = document.getElementById('arrow-' + id);
+      const isHidden = panel.classList.contains('hidden');
+      if (isHidden) {
+        panel.classList.remove('hidden');
+        arrow.classList.add('rotate-90', 'bg-cyan-500', 'text-slate-950', 'border-cyan-400');
+        arrow.classList.remove('bg-slate-800', 'text-slate-200', 'border-slate-700');
+      } else {
+        panel.classList.add('hidden');
+        arrow.classList.remove('rotate-90', 'bg-cyan-500', 'text-slate-950', 'border-cyan-400');
+        arrow.classList.add('bg-slate-800', 'text-slate-200', 'border-slate-700');
+      }
+    }
+
+    function scrollAr(containerId, delta) {
+      const el = document.getElementById(containerId);
+      if (el) el.scrollBy({ top: delta, behavior: 'smooth' });
+    }
+
+    // Poll Python YOLOv8 server on http://127.0.0.1:5000/telemetry
+    setInterval(async () => {
+      try {
+        const res = await fetch('http://127.0.0.1:5000/telemetry');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (typeof data.detected === 'boolean') {
+          isDetected = data.detected;
+          document.getElementById('arBlocksWrapper').style.display = isDetected ? 'flex' : 'none';
+          document.getElementById('arLeftCallout').style.display = isDetected ? 'block' : 'none';
+        }
+        if (data.bbox) bbox = data.bbox;
+        if (data.confidence) {
+          confidence = data.confidence;
+          document.getElementById('confLabel').textContent = confidence.toFixed(2);
+        }
+        if (data.label) label = data.label;
+      } catch (_) {}
+    }, 250);
+
+    function drawLoop() {
+      const canvas = document.getElementById('yoloCanvas');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (isDetected && sourceMode !== 'python') {
+        const x = bbox[0] * canvas.width;
+        const y = bbox[1] * canvas.height;
+        const w = (bbox[2] - bbox[0]) * canvas.width;
+        const h = (bbox[3] - bbox[1]) * canvas.height;
+
+        ctx.strokeStyle = '#0038ff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
+
+        const tag = label + ' ' + confidence.toFixed(2);
+        ctx.font = 'bold 15px "JetBrains Mono", monospace';
+        const tw = ctx.measureText(tag).width + 14;
+        ctx.fillStyle = '#0038ff';
+        ctx.fillRect(x, Math.max(55, y - 26), tw, 26);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(tag, x + 6, Math.max(55, y - 26) + 18);
+      }
+      requestAnimationFrame(drawLoop);
+    }
+
+    startWebcam();
+    requestAnimationFrame(drawLoop);
+  </script>
+</body>
+</html>

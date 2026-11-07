@@ -1,0 +1,6 @@
+{
+  "name": "Celsius AR Vision — YOLOv8 Webcam HUD",
+  "description": "Full-screen YOLOv8 webcam AR overlay for Celsius Energy Drink detection with interactive collapsible blocks for Ingredient Decoder, Company Drama, and Smart Device Advice.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

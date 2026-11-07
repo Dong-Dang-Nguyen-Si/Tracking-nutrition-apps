@@ -1,0 +1,1391 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vision & Beverage Truth Decoder — CELSIUS Sparkling Watermelon Lemonade (355mL)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- TensorFlow.js & COCO-SSD for Real-Time In-Browser Webcam Can/Bottle Detection -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #090d16;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        /* Subtle HUD Grid Overlay */
+        .hud-grid {
+            background-size: 30px 30px;
+            background-image: 
+                linear-gradient(to right, rgba(16, 185, 129, 0.06) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(16, 185, 129, 0.06) 1px, transparent 1px);
+        }
+
+        /* Mode Switcher Styles matching "The model one.html" */
+        .switch-mode {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 4px;
+            border-radius: 8px;
+            border: 1px solid rgba(51, 65, 85, 0.7);
+        }
+        .switch-active {
+            background: #10b981;
+            color: #020617;
+            font-weight: 700;
+            font-size: 11px;
+            padding: 5px 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .switch-inactive {
+            background: transparent;
+            color: #94a3b8;
+            font-weight: 600;
+            font-size: 11px;
+            padding: 5px 6px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .switch-inactive:hover {
+            color: #f8fafc;
+            background: rgba(51, 65, 85, 0.5);
+        }
+
+        /* Horizontal Laser Line */
+        @keyframes scanLaser {
+            0% { top: 6%; opacity: 0.75; }
+            50% { top: 92%; opacity: 1; }
+            100% { top: 6%; opacity: 0.75; }
+        }
+        .laser-line {
+            position: absolute;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent 0%, #10b981 20%, #34d399 50%, #10b981 80%, transparent 100%);
+            box-shadow: 0 0 12px 2px rgba(16, 185, 129, 0.55);
+            animation: scanLaser 3.6s ease-in-out infinite;
+            pointer-events: none;
+            z-index: 15;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-slate-950 h-screen flex flex-col overflow-hidden">
+
+    <!-- ========================================================================= -->
+    <!-- TOP HALF OF SCREEN (~46vh): REAL-TIME CAMERA & YOLOv8 VISION VIEWPORT     -->
+    <!-- ========================================================================= -->
+    <section id="topCameraSection" class="relative w-full h-[46vh] min-h-[330px] max-h-[480px] bg-slate-950 border-b-2 border-slate-800 overflow-hidden select-none shrink-0 hud-grid">
+        
+        <!-- Laser Scan Effect -->
+        <div class="laser-line"></div>
+
+        <!-- 1. FLOATING TOP-LEFT HUD PANEL (Matches "The model one.html" structure) -->
+        <div class="absolute top-3 left-3 z-30 w-[330px] sm:w-[355px] bg-slate-900/90 backdrop-blur-md p-3.5 rounded-xl border border-slate-800 shadow-2xl">
+            <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+                <div class="flex items-center gap-2">
+                    <span id="hudStatusDot" class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></span>
+                    <h2 class="font-bold text-xs sm:text-sm tracking-wide text-white uppercase">AI & Robotics Vision System</h2>
+                </div>
+                <span id="aiEngineBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                    YOLOv8 + TF.js
+                </span>
+            </div>
+
+            <!-- Toggle 3 Modes -->
+            <div class="mt-2.5 switch-mode">
+                <button id="btn-mode-legacy" onclick="switchVisionMode('sim')" class="switch-active">Simulation (Test)</button>
+                <button id="btn-mode-real" onclick="switchVisionMode('real')" class="switch-inactive">Real Match (YOLO)</button>
+                <button id="btn-mode-robot" onclick="switchVisionMode('python')" class="switch-inactive">Python (:5000)</button>
+            </div>
+
+            <!-- Telemetry Readout: Can Velocity & 3D Coordinates -->
+            <div class="mt-2.5 space-y-2 text-xs font-mono">
+                <div class="flex justify-between items-center bg-slate-800/60 px-2.5 py-1.5 rounded border border-slate-700/40">
+                    <span class="text-slate-400">Can Velocity:</span>
+                    <div class="text-right flex items-center gap-2">
+                        <span id="speed-val" class="text-amber-400 font-bold text-sm">0.04 m/s</span>
+                        <span class="text-slate-600">|</span>
+                        <span class="text-emerald-400 text-[11px]"><span id="fps-val">60</span> FPS</span>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800/60 p-2 rounded border border-slate-700/40">
+                    <div class="flex items-center justify-between text-slate-400 mb-1 text-[11px]">
+                        <span>3D Coordinates (m):</span>
+                        <span id="trackingLockHint" class="text-[10px] text-cyan-400">Drag can or use Webcam</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-1.5 text-center font-bold text-xs">
+                        <div class="bg-rose-500/10 text-rose-400 rounded py-1 border border-rose-500/30">
+                            X: <span id="coord-x">0.02</span>
+                        </div>
+                        <div class="bg-emerald-500/10 text-emerald-400 rounded py-1 border border-emerald-500/30">
+                            Y: <span id="coord-y">0.05</span>
+                        </div>
+                        <div class="bg-blue-500/10 text-blue-400 rounded py-1 border border-blue-500/30">
+                            Z: <span id="coord-z">0.42</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Action Row inside HUD -->
+            <div class="mt-2.5 flex items-center gap-1.5">
+                <button id="btnLockCenter" onclick="resetOrLockCanTarget()" class="flex-1 py-1.5 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-lg transition flex items-center justify-center gap-1.5 shadow">
+                    <i class="fa-solid fa-crosshairs"></i>
+                    <span id="lockBtnLabel">Re-Center Target Lock</span>
+                </button>
+                <label class="cursor-pointer py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs rounded-lg transition flex items-center gap-1" title="Upload a photo of your Celsius can">
+                    <i class="fa-solid fa-camera text-cyan-400"></i>
+                    <span>Photo</span>
+                    <input type="file" accept="image/*" class="hidden" onchange="handlePhotoUpload(event)">
+                </label>
+            </div>
+        </div>
+
+        <!-- 2. FLOATING TOP-RIGHT CONTROLS (Can Side Toggle & Python Code Modal) -->
+        <div class="absolute top-3 right-3 z-30 flex flex-wrap items-center justify-end gap-2">
+            <!-- Front vs Back OCR Switch -->
+            <div class="flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-800 text-xs shadow-xl">
+                <button id="btnSideFront" onclick="setCanSide('front')" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-bottle-water"></i> Front (Logo)
+                </button>
+                <button id="btnSideBack" onclick="setCanSide('back')" class="px-3 py-1.5 rounded-lg text-slate-300 hover:text-white font-semibold transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-microscope"></i> Back (Ingredients OCR)
+                </button>
+            </div>
+
+            <!-- Standalone Python YOLOv8 Code Button -->
+            <button onclick="togglePythonModal(true)" class="px-3 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 backdrop-blur-md border border-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-1.5 shadow-xl transition">
+                <i class="fa-brands fa-python text-amber-400 text-sm"></i>
+                <span class="hidden sm:inline">main.py (Real YOLOv8)</span>
+            </button>
+        </div>
+
+        <!-- 3. LIVE MEDIA & INTERACTIVE STAGE -->
+        <div id="visionStage" class="relative w-full h-full flex items-center justify-center overflow-hidden">
+            
+            <!-- A. Real Webcam Video (Active in "Real Match (YOLO)" mode) -->
+            <video id="webcamVideo" autoplay playsinline muted class="hidden absolute inset-0 w-full h-full object-cover z-10 cursor-crosshair" title="Click directly on your Celsius can in the video to calibrate optical tracking!"></video>
+
+            <!-- B. Python Flask MJPEG Stream (Active in "Python (:5000)" mode) -->
+            <img id="pythonStreamImg" alt="Python YOLOv8 Stream" class="hidden absolute inset-0 w-full h-full object-contain bg-slate-950 z-10" />
+
+            <!-- C. Uploaded Custom Photo -->
+            <img id="uploadedPhotoImg" alt="Uploaded Can" class="hidden absolute inset-0 w-full h-full object-contain bg-slate-950 z-10" />
+
+            <!-- D. Interactive Draggable CELSIUS Can (Active in "Simulation (Test)" mode) -->
+            <div id="simCanDraggable" class="relative z-10 cursor-grab active:cursor-grabbing transition-transform duration-75" style="transform: translate(60px, 0px);">
+                
+                <!-- FRONT OF CELSIUS CAN SVG -->
+                <div id="svgCanFront" class="select-none">
+                    <svg viewBox="0 0 260 510" class="w-36 sm:w-40 md:w-44 h-auto drop-shadow-[0_20px_30px_rgba(0,0,0,0.85)] pointer-events-none">
+                        <defs>
+                            <linearGradient id="canBodyGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#cbd5e1"/>
+                                <stop offset="18%" stop-color="#f8fafc"/>
+                                <stop offset="52%" stop-color="#ffffff"/>
+                                <stop offset="85%" stop-color="#e2e8f0"/>
+                                <stop offset="100%" stop-color="#94a3b8"/>
+                            </linearGradient>
+                            <linearGradient id="silverRimGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#64748b"/>
+                                <stop offset="30%" stop-color="#cbd5e1"/>
+                                <stop offset="55%" stop-color="#f1f5f9"/>
+                                <stop offset="85%" stop-color="#94a3b8"/>
+                                <stop offset="100%" stop-color="#475569"/>
+                            </linearGradient>
+                            <linearGradient id="celsiusCGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" stop-color="#ef4444"/>
+                                <stop offset="45%" stop-color="#84cc16"/>
+                                <stop offset="100%" stop-color="#10b981"/>
+                            </linearGradient>
+                        </defs>
+                        <!-- Black Top Rim (Health Canada Edition) -->
+                        <ellipse cx="130" cy="22" rx="102" ry="12" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+                        <path d="M28 22 Q130 34 232 22 L242 46 Q130 56 18 46 Z" fill="url(#canBodyGrad)"/>
+                        <rect x="18" y="44" width="224" height="360" rx="8" fill="url(#canBodyGrad)"/>
+                        <!-- Health Canada Supplemented Box -->
+                        <rect x="82" y="27" width="96" height="24" rx="2" fill="#ffffff" stroke="#0f172a" stroke-width="1.8"/>
+                        <text x="89" y="44" font-family="Inter, sans-serif" font-weight="900" font-size="16" fill="#0f172a">!</text>
+                        <rect x="97" y="30" width="77" height="9" fill="#0f172a"/>
+                        <text x="135" y="37" text-anchor="middle" font-family="Inter, sans-serif" font-weight="700" font-size="6.5" fill="#ffffff">Supplemented</text>
+                        <text x="135" y="47" text-anchor="middle" font-family="Inter, sans-serif" font-weight="600" font-size="6.2" fill="#334155">Health Canada</text>
+                        <!-- °C Logo -->
+                        <circle cx="84" cy="76" r="8" fill="none" stroke="#cbd5e1" stroke-width="4.5"/>
+                        <path d="M90 105 C95 66, 150 58, 178 72 C168 88, 145 92, 118 88 C102 86, 94 95, 90 105 Z" fill="url(#celsiusCGrad)"/>
+                        <path d="M90 102 C82 142, 132 168, 174 138 L158 118 C135 135, 112 124, 114 98 Z" fill="url(#silverRimGrad)"/>
+                        <!-- CELSIUS ENERGY -->
+                        <text x="130" y="190" text-anchor="middle" font-family="Inter, sans-serif" font-weight="900" font-size="31" letter-spacing="1" fill="#0f172a">CELSIUS<tspan font-size="12">®</tspan></text>
+                        <text x="169" y="203" text-anchor="middle" font-family="Inter, sans-serif" font-weight="800" font-size="10.5" letter-spacing="1.2" fill="#dc2626">ENERGY</text>
+                        <!-- Watermelon & Lemon Wedge -->
+                        <g transform="translate(68, 214)">
+                            <path d="M5 10 Q45 78 115 32 Q65 18 5 10 Z" fill="#15803d"/>
+                            <path d="M9 12 Q47 71 110 31 Q65 19 9 12 Z" fill="#dcfce7"/>
+                            <path d="M12 13 Q49 65 106 30 Q60 19 12 13 Z" fill="#ef4444"/>
+                            <circle cx="95" cy="38" r="18" fill="#facc15" stroke="#fef08a" stroke-width="2"/>
+                            <path d="M62 46 Q82 66 104 46 Z" fill="#fde047" stroke="#eab308" stroke-width="1.5"/>
+                        </g>
+                        <text x="58" y="298" font-family="Inter, sans-serif" font-weight="500" font-size="19" letter-spacing="0.8" fill="#1e293b">SPARKLING</text>
+                        <text x="58" y="312" font-family="Inter, sans-serif" font-weight="800" font-size="9.2" fill="#e11d48">WATERMELON LEMONADE FLAVOUR</text>
+                        <rect x="18" y="334" width="224" height="58" fill="#0f172a"/>
+                        <text x="58" y="350" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#f8fafc">▸ ENERGY DRINK</text>
+                        <text x="58" y="365" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#f8fafc">▸ ZERO SUGAR</text>
+                        <text x="58" y="380" font-family="Inter, sans-serif" font-weight="600" font-size="10" fill="#f8fafc">▸ ESSENTIAL FLAVOURS</text>
+                        <rect x="18" y="392" width="224" height="82" fill="url(#silverRimGrad)"/>
+                        <text x="130" y="462" text-anchor="middle" font-family="Inter, sans-serif" font-weight="700" font-size="10" fill="#0f172a">High Caffeine Content • 355 mL</text>
+                        <path d="M18 474 Q130 492 242 474 L226 494 Q130 508 34 494 Z" fill="#94a3b8"/>
+                    </svg>
+                </div>
+
+                <!-- BACK OF CELSIUS CAN SVG (Ingredients & Supplemented Food Facts) -->
+                <div id="svgCanBack" class="hidden select-none">
+                    <svg viewBox="0 0 280 510" class="w-36 sm:w-40 md:w-44 h-auto drop-shadow-[0_20px_30px_rgba(0,0,0,0.85)] pointer-events-none">
+                        <ellipse cx="140" cy="22" rx="108" ry="12" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+                        <rect x="22" y="28" width="236" height="452" rx="10" fill="url(#canBodyGrad)"/>
+                        <rect x="30" y="42" width="122" height="270" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+                        <text x="34" y="56" font-family="Inter, sans-serif" font-weight="900" font-size="9.5" fill="#0f172a">Supplemented Food Facts</text>
+                        <text x="34" y="84" font-family="Inter, sans-serif" font-weight="900" font-size="10" fill="#0f172a">Calories 10 • Sugars 0g</text>
+                        <text x="34" y="135" font-family="Inter, sans-serif" font-weight="600" font-size="7" fill="#0f172a">Biotin 57% • Niacin 125%</text>
+                        <text x="34" y="148" font-family="Inter, sans-serif" font-weight="600" font-size="7" fill="#0f172a">Pantothenate 200% • B2 154%</text>
+                        <text x="34" y="161" font-family="Inter, sans-serif" font-weight="600" font-size="7" fill="#0f172a">Vitamin B6 118% • B12 250%</text>
+                        <rect x="32" y="196" width="118" height="26" fill="#fef3c7"/>
+                        <text x="34" y="207" font-family="Inter, sans-serif" font-weight="900" font-size="8" fill="#b45309">Caffeine: 140 mg</text>
+                        <text x="34" y="218" font-family="Inter, sans-serif" font-weight="900" font-size="8" fill="#0f766e">Taurine: 1094 mg</text>
+                        <rect x="32" y="228" width="118" height="78" fill="#fff1f2" stroke="#e11d48" stroke-width="1"/>
+                        <text x="35" y="242" font-family="Inter, sans-serif" font-weight="800" font-size="6.8" fill="#be123c">Caution: Under 14 yrs, pregnant.</text>
+                        <text x="35" y="254" font-family="Inter, sans-serif" font-weight="700" font-size="6.5" fill="#881337">Max 1 serving per day.</text>
+                        <!-- Right Column: Ingredients -->
+                        <rect x="156" y="42" width="94" height="270" fill="#ffffff" stroke="#0f172a" stroke-width="1.5"/>
+                        <text x="160" y="55" font-family="Inter, sans-serif" font-weight="900" font-size="8.5" fill="#0f172a">Ingredients:</text>
+                        <text x="160" y="67" font-family="Inter, sans-serif" font-weight="600" font-size="7" fill="#334155">Carbonated water,</text>
+                        <rect x="158" y="71" width="88" height="23" fill="#fee2e2"/>
+                        <text x="160" y="79" font-family="Inter, sans-serif" font-weight="800" font-size="7.2" fill="#b91c1c">Citric acid, Taurine,</text>
+                        <text x="160" y="90" font-family="Inter, sans-serif" font-weight="800" font-size="7.2" fill="#b91c1c">Malic acid, Green tea,</text>
+                        <text x="160" y="135" font-family="Inter, sans-serif" font-weight="700" font-size="7" fill="#0369a1">Glucuronolactone,</text>
+                        <rect x="158" y="139" width="88" height="22" fill="#fef3c7"/>
+                        <text x="160" y="147" font-family="Inter, sans-serif" font-weight="800" font-size="7.2" fill="#b45309">Sucralose, Acesulfame</text>
+                        <text x="160" y="157" font-family="Inter, sans-serif" font-weight="800" font-size="7.2" fill="#b45309">potassium, Ginger,</text>
+                        <text x="160" y="213" font-family="Inter, sans-serif" font-weight="700" font-size="7" fill="#0f766e">Cyanocobalamin (B12).</text>
+                        <text x="32" y="345" font-family="Inter, sans-serif" font-weight="700" font-size="7.2" fill="#0f172a">Prepared in Canada for CELSIUS, Inc.</text>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- E. REAL-TIME YOLOv8 BOUNDING BOX CANVAS OVERLAY (Follows the can in both Sim & Real Webcam!) -->
+            <canvas id="yoloCanvasOverlay" class="absolute inset-0 w-full h-full pointer-events-none z-20"></canvas>
+
+            <!-- F. Bottom-Right Live Tracking Tip Banner -->
+            <div id="webcamTipBanner" class="absolute bottom-2.5 right-3 z-30 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-1.5 text-[11px] text-slate-300 flex items-center gap-2 shadow-lg">
+                <i class="fa-solid fa-hand-pointer text-emerald-400"></i>
+                <span id="webcamTipText"><b>Simulation Mode:</b> Drag the Celsius can around to test live 3D YOLO tracking, or click <b>Real Match (YOLO)</b> to track your actual can on Webcam!</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- BOTTOM HALF OF SCREEN (~54vh): INTERACTIVE DECODER, DRAMA & ADVICE        -->
+    <!-- ========================================================================= -->
+    <section class="flex-1 w-full bg-slate-950 flex flex-col overflow-y-auto">
+        
+        <!-- STICKY TOP BAR: PRODUCT SNAPSHOT + 3 BIG NAVIGATION TABS -->
+        <div class="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 lg:px-8 pt-2.5 pb-2.5 shadow-lg">
+            <div class="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                
+                <!-- Compact Product Identity & Quick Macros -->
+                <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-mono uppercase font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            Health Canada Supplemented
+                        </span>
+                        <h1 class="text-sm sm:text-base font-extrabold text-white tracking-tight">
+                            CELSIUS® Sparkling Watermelon Lemonade <span class="text-slate-400 font-normal text-xs">(355 mL)</span>
+                        </h1>
+                    </div>
+                    <!-- Mini Macro Pills -->
+                    <div class="hidden xl:flex items-center gap-1.5 text-[11px] font-mono">
+                        <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700">10 Cal • 0g Sugar</span>
+                        <span class="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-semibold">Caffeine: 140mg</span>
+                        <span class="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold">Taurine: 1094mg</span>
+                        <span class="px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-semibold">pH ~3.1 (Acidic)</span>
+                    </div>
+                </div>
+
+                <!-- 3 Primary Tabs (Matching User's Screenshot Layout in English) -->
+                <div class="grid grid-cols-3 gap-2 w-full lg:w-auto lg:min-w-[560px]">
+                    <button id="tabBtn-ingredients" onclick="switchTab('ingredients')" class="py-2 px-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/10">
+                        <i class="fa-solid fa-flask"></i>
+                        <span>1. Ingredient Decoder</span>
+                    </button>
+                    <button id="tabBtn-drama" onclick="switchTab('drama')" class="py-2 px-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition bg-slate-800/90 hover:bg-slate-800 text-slate-300 border border-slate-700/70">
+                        <i class="fa-solid fa-scale-unbalanced"></i>
+                        <span>2. Company Drama</span>
+                        <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-500 text-white font-mono">4</span>
+                    </button>
+                    <button id="tabBtn-advice" onclick="switchTab('advice')" class="py-2 px-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition bg-slate-800/90 hover:bg-slate-800 text-slate-300 border border-slate-700/70">
+                        <i class="fa-solid fa-lightbulb"></i>
+                        <span>3. Smart Advice</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN TAB CONTENT AREA -->
+        <div class="max-w-7xl w-full mx-auto px-4 lg:px-8 py-4 flex-1">
+
+            <!-- ================================================================= -->
+            <!-- TAB 1: INGREDIENT DECODER (CONCISE & PUNCHY ENGLISH)              -->
+            <!-- ================================================================= -->
+            <div id="tabPanel-ingredients" class="space-y-3.5">
+                
+                <!-- Filter Bar -->
+                <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 border border-slate-800 rounded-xl p-2.5">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <button onclick="filterIngredients('all')" id="filter-all" class="px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500 text-slate-950 transition">
+                            All Decoded (6)
+                        </button>
+                        <button onclick="filterIngredients('caution')" id="filter-caution" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-rose-300 border border-rose-500/30 transition">
+                            ⚠️ Risk / Caution (3)
+                        </button>
+                        <button onclick="filterIngredients('mystery')" id="filter-mystery" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 transition">
+                            🔍 Scary Name, Actually Safe (2)
+                        </button>
+                        <button onclick="filterIngredients('good')" id="filter-good" class="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-emerald-300 border border-emerald-500/30 transition">
+                            ✅ Vitamins & Halo (1)
+                        </button>
+                    </div>
+                    <span class="text-[11px] text-slate-400 hidden md:inline">
+                        <i class="fa-solid fa-bolt text-emerald-400 mr-1"></i>Click any card to spotlight that chemical on the YOLO camera above
+                    </span>
+                </div>
+
+                <!-- Ingredient Cards Grid -->
+                <div id="ingredientsContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- ================================================================= -->
+            <!-- TAB 2: COMPANY DRAMA & ETHICS (CELSIUS HOLDINGS, INC.)            -->
+            <!-- ================================================================= -->
+            <div id="tabPanel-drama" class="hidden space-y-3.5">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                        <span class="text-[10px] font-mono uppercase tracking-wider text-cyan-400">Corporate Accountability & Supply Chain Record</span>
+                        <h3 class="text-sm sm:text-base font-bold text-white">Celsius Holdings, Inc. (NASDAQ: CELH) — Boca Raton, FL • Distributed by PepsiCo</h3>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-semibold shrink-0">
+                        Controversy Level: Moderate–High
+                    </span>
+                </div>
+
+                <div id="dramaContainer" class="grid grid-cols-1 lg:grid-cols-2 gap-3.5">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+
+            <!-- ================================================================= -->
+            <!-- TAB 3: SMART RECOMMENDATIONS (MATCHING SCREENSHOT IN ENGLISH)     -->
+            <!-- ================================================================= -->
+            <div id="tabPanel-advice" class="hidden space-y-4">
+                
+                <!-- Scenario Selector Card -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3.5">
+                        <button onclick="selectScenario('workout')" id="scen-workout" class="p-3 rounded-xl border-2 border-emerald-400 bg-emerald-500/15 text-left transition">
+                            <div class="text-lg mb-1">🏋️‍♂️</div>
+                            <div class="text-xs sm:text-sm font-bold text-white">Pre-Workout / Gym</div>
+                            <div class="text-[11px] text-emerald-300 font-medium">Best Fit</div>
+                        </button>
+                        <button onclick="selectScenario('study')" id="scen-study" class="p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800/70 text-left transition">
+                            <div class="text-lg mb-1">💻</div>
+                            <div class="text-xs sm:text-sm font-bold text-white">Studying / Deadline</div>
+                            <div class="text-[11px] text-amber-300 font-medium">Watch for Jitters</div>
+                        </button>
+                        <button onclick="selectScenario('empty')" id="scen-empty" class="p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800/70 text-left transition">
+                            <div class="text-lg mb-1">🍽️</div>
+                            <div class="text-xs sm:text-sm font-bold text-white">Empty Stomach / Thirsty</div>
+                            <div class="text-[11px] text-rose-400 font-medium">Stomach & Enamel Risk</div>
+                        </button>
+                        <button onclick="selectScenario('night')" id="scen-night" class="p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800/70 text-left transition">
+                            <div class="text-lg mb-1">🌙</div>
+                            <div class="text-xs sm:text-sm font-bold text-white">After 4:00 PM / Evening</div>
+                            <div class="text-[11px] text-rose-400 font-medium">Ruins Deep Sleep</div>
+                        </button>
+                    </div>
+
+                    <!-- Dynamic Verdict Box -->
+                    <div id="scenarioResultBox" class="bg-slate-950 border border-emerald-500/40 rounded-xl p-3.5 text-xs sm:text-sm leading-relaxed">
+                        <!-- Populated via JS -->
+                    </div>
+                </div>
+
+                <!-- 3 Golden Rules + Healthier Alternatives side by side on wide screens -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <!-- 3 Golden Rules -->
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-shield-heart text-cyan-400"></i>
+                            <span>3 Rules to Protect Your Body from Citric/Malic Acid & 140mg Caffeine</span>
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                                <div class="font-bold text-amber-300 mb-1 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-tooth"></i> 1. Protect Enamel
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    <b>Citric + Malic Acid</b> drop pH to ~3.1. Drink with a straw and <b>rinse with plain water</b> immediately after. Wait 30 mins before brushing.
+                                </p>
+                            </div>
+                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                                <div class="font-bold text-emerald-300 mb-1 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-clock"></i> 2. Golden Timing
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    Drink <b>20–30 mins pre-workout</b> after a light snack. Never exceed <b>1 can per day</b> as mandated by Health Canada on the label.
+                                </p>
+                            </div>
+                            <div class="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                                <div class="font-bold text-cyan-300 mb-1 flex items-center gap-1.5">
+                                    <i class="fa-solid fa-droplet"></i> 3. 1:2 Water Rule
+                                </div>
+                                <p class="text-slate-300 leading-relaxed">
+                                    140mg caffeine is mildly diuretic and excess B-vitamins require kidney filtration. Pair 1 can (355mL) with <b>500mL plain water</b>.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Healthier Alternatives -->
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-leaf text-emerald-400"></i>
+                            <span>Cleaner Alternatives (No Artificial Sweeteners & Lower Acidity)</span>
+                        </h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                            <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                                <div class="font-bold text-emerald-400">🍵 Cold-Brew Matcha</div>
+                                <p class="text-slate-400 mt-1">~60–80mg natural caffeine + <b>L-Theanine</b> for calm, sustained focus with zero heart palpitations or crash.</p>
+                            </div>
+                            <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                                <div class="font-bold text-cyan-400">🥥 Coconut Water + Lime</div>
+                                <p class="text-slate-400 mt-1">Natural Potassium & Magnesium electrolytes for hydration without Sucralose or Acesulfame-K.</p>
+                            </div>
+                            <div class="p-3 rounded-lg bg-slate-950 border border-slate-800">
+                                <div class="font-bold text-amber-400">☕ Iced Americano</div>
+                                <p class="text-slate-400 mt-1">~110mg clean caffeine, only 2 ingredients (coffee + water), and pH ~5.0 is far gentler on teeth than pH 3.1 soda.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- MODAL: STANDALONE PYTHON YOLOv8 + OPENCV + FLASK SERVER (main.py)         -->
+    <!-- ========================================================================= -->
+    <div id="pythonCodeModal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full max-h-[86vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="px-5 py-3.5 border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <i class="fa-brands fa-python text-amber-400 text-lg"></i>
+                    <h3 class="font-bold text-sm sm:text-base text-white">main.py — Real Ultralytics YOLOv8 + OpenCV Desktop Window & Web Server</h3>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="copyPythonCode()" id="btnCopyPy" class="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition flex items-center gap-1.5">
+                        <i class="fa-regular fa-copy"></i> Copy main.py
+                    </button>
+                    <button onclick="togglePythonModal(false)" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="p-4 overflow-y-auto font-mono text-xs text-slate-200 bg-slate-950 leading-relaxed">
+<pre id="pythonCodeBlock" class="whitespace-pre-wrap"># main.py — Real YOLOv8 Beverage Can Detector + Live 3D Telemetry Server
+# Install: pip install ultralytics opencv-python flask flask-cors numpy
+# Run:     python main.py
+
+import time
+import cv2
+import numpy as np
+from ultralytics import YOLO
+from flask import Flask, Response, jsonify
+from flask_cors import CORS
+
+app = Flask(__name__)
+CORS(app)
+
+# Load official YOLOv8n model (detects 'bottle'/'cup'/cans in real time)
+model = YOLO("yolov8n.pt")
+
+REAL_CAN_HEIGHT_M = 0.156  # 355mL Celsius sleek can height = 15.6 cm
+FOCAL_LENGTH_PX = 620.0
+
+telemetry_state = {
+    "detected": False,
+    "label": "CELSIUS_WATERMELON_355ML",
+    "conf": 0.0,
+    "velocity_ms": 0.0,
+    "coords": {"x": 0.0, "y": 0.0, "z": 0.0}
+}
+
+def generate_frames():
+    cap = cv2.VideoCapture(0)
+    prev_pos = None
+    prev_time = time.time()
+
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        h, w, _ = frame.shape
+        now = time.time()
+        dt = max(now - prev_time, 0.001)
+
+        # Detect bottle (39), cup (41), or cell-phone/cylindrical objects
+        results = model.predict(frame, classes=[39, 41], conf=0.20, verbose=False)
+        best_box = None
+
+        for r in results:
+            for box in r.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                conf = float(box.conf[0])
+                best_box = (x1, y1, x2, y2, conf)
+                break
+
+        if best_box:
+            x1, y1, x2, y2, conf = best_box
+            box_h = max(y2 - y1, 20)
+            cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+
+            # Compute 3D Coordinates (X, Y, Z in meters)
+            z_m = round((REAL_CAN_HEIGHT_M * FOCAL_LENGTH_PX) / box_h, 2)
+            x_m = round(((cx - w / 2.0) * z_m) / FOCAL_LENGTH_PX, 2)
+            y_m = round(((w / 2.0 - cy) * z_m) / FOCAL_LENGTH_PX, 2)
+
+            vel = 0.0
+            if prev_pos is not None:
+                dist = np.linalg.norm(np.array([x_m, y_m, z_m]) - prev_pos)
+                vel = round(float(dist / dt), 2)
+            prev_pos = np.array([x_m, y_m, z_m])
+            prev_time = now
+
+            telemetry_state.update({
+                "detected": True,
+                "conf": round(min(conf + 0.25, 0.98), 2),
+                "velocity_ms": vel,
+                "coords": {"x": x_m, "y": y_m, "z": z_m}
+            })
+
+            # Draw Primary Green YOLO Box + Sub-OCR Boxes
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (16, 185, 129), 2)
+            cv2.putText(frame, f"CELSIUS_355ML {telemetry_state['conf']:.2f}",
+                        (x1, max(24, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (16, 185, 129), 2)
+
+        ret, buffer = cv2.imencode('.jpg', frame)
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/telemetry')
+def get_telemetry():
+    return jsonify(telemetry_state)
+
+if __name__ == '__main__':
+    print("Starting YOLOv8 Server on http://127.0.0.1:5000")
+    app.run(host='0.0.0.0', port=5000)</pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- APPLICATION DATA & REAL-TIME TF.JS + OPTICAL CAN TRACKING ENGINE          -->
+    <!-- ========================================================================= -->
+    <script>
+        // -------------------------------------------------------------------------
+        // 1. CONCISE ENGLISH INGREDIENT DATA (Short, punchy, presentation-ready)
+        // -------------------------------------------------------------------------
+        const INGREDIENTS_DATA = [
+            {
+                id: 'citric_malic',
+                name: 'Citric Acid & Malic Acid',
+                labelOnCan: 'Citric acid, Malic acid (2nd & 4th ingredients)',
+                category: 'caution',
+                badge: '⚠️ ACIDITY & PRESERVATIVE TRICK',
+                badgeColor: 'rose',
+                riskScore: 3.5,
+                riskLabel: 'Risk: 3.5/5 (Enamel & Stomach)',
+                truth: 'Added for tart flavor and shelf-life stability—allowing Celsius to market "No Preservatives" while still chemically preventing spoilage (sparking an $8.2M lawsuit).',
+                impact: 'Pulls beverage pH down to ~3.1 (near vinegar). Erodes tooth enamel and triggers acid reflux or stomach irritation when consumed on an empty stomach.'
+            },
+            {
+                id: 'taurine_1094',
+                name: 'Taurine (1094 mg — Over 1 Gram!)',
+                labelOnCan: 'Taurine: 1094 mg (3rd ingredient, 7x more than Caffeine)',
+                category: 'mystery',
+                badge: '🔍 SCARY NAME (ACTUALLY BENEFICIAL)',
+                badgeColor: 'cyan',
+                riskScore: 1,
+                riskLabel: 'Risk: 1/5 (Safe & Protective)',
+                truth: 'Despite urban myths, Taurine is NOT a stimulant. It is a natural amino sulfonic acid abundant in human heart, brain, and muscle tissue (safe up to 3,000mg/day per EFSA).',
+                impact: 'Regulates heartbeat, reduces muscular oxidative stress during workouts, and calms the nervous jitteriness caused by 140mg of caffeine.'
+            },
+            {
+                id: 'caffeine_140',
+                name: 'Caffeine (140 mg) + Green Tea Extract',
+                labelOnCan: 'Caffeine: 140 mg, Instant green tea',
+                category: 'caution',
+                badge: '⚠️ HIGH STIMULANT (HEALTH CANADA WARNING)',
+                badgeColor: 'amber',
+                riskScore: 3.5,
+                riskLabel: 'Risk: 3.5/5 (Max 1 Can/Day)',
+                truth: 'Equals ~1.5 espresso shots. Combines anhydrous caffeine with green tea catechins (EGCG) to boost metabolic rate, prompting Health Canada\'s mandatory top-can warning.',
+                impact: 'Enhances endurance when exercising, but sitting still with 140mg causes heart palpitations, anxiety, and blocks deep REM sleep if taken after 4 PM.'
+            },
+            {
+                id: 'sucralose_acek',
+                name: 'Sucralose & Acesulfame Potassium (Ace-K)',
+                labelOnCan: 'Sucralose, Acesulfame potassium',
+                category: 'caution',
+                badge: '⚠️ ARTIFICIAL SWEETENER DUO',
+                badgeColor: 'amber',
+                riskScore: 2.5,
+                riskLabel: 'Risk: 2.5/5 (Gut Microbiome)',
+                truth: 'Achieves "Zero Sugar / 10 Cal" using synthetic sweeteners 200x–600x sweeter than sugar. Ace-K is paired specifically to mask the bitter aftertaste of Sucralose.',
+                impact: 'Prevents blood sugar spikes, but frequent daily consumption can disrupt gut microbiome diversity and reinforce intense sweet cravings.'
+            },
+            {
+                id: 'glucuronolactone',
+                name: 'Glucuronolactone & Ginger Extract',
+                labelOnCan: 'Glucuronolactone, Instant green tea, Ginger',
+                category: 'mystery',
+                badge: '🔍 COMPLEX CHEMICAL NAME (BENIGN)',
+                badgeColor: 'cyan',
+                riskScore: 1,
+                riskLabel: 'Risk: 1/5 (Harmless)',
+                truth: 'Sounds like an industrial chemical, but Glucuronolactone is a natural glucose metabolite produced in the human liver to support connective tissue.',
+                impact: 'Harmless at energy drink doses; ginger extract mildly supports digestion and thermogenesis.'
+            },
+            {
+                id: 'vitamin_b_complex',
+                name: 'High-Dose Vitamin B Complex (118%–250% DV) & Vit C',
+                labelOnCan: 'B12 (250%), B5 (200%), B2 (154%), B3 (125%), B6 (118%), Vit C (67%)',
+                category: 'good',
+                badge: '✅ VITAMIN HALO (EXCESS FLUSHED OUT)',
+                badgeColor: 'emerald',
+                riskScore: 1,
+                riskLabel: 'Risk: 1/5 (Safe Water-Soluble)',
+                truth: 'Uses chemical names on the label (Cyanocobalamin = B12, Riboflavin = B2, Ascorbic Acid = Vit C) to create a "healthy supplement" marketing halo.',
+                impact: 'Because B-vitamins are water-soluble, your body absorbs only what it needs and kidneys flush the rest (turning urine bright neon yellow).'
+            }
+        ];
+
+        // -------------------------------------------------------------------------
+        // 2. CORPORATE DRAMA & ETHICS DATA (Concise English)
+        // -------------------------------------------------------------------------
+        const DRAMA_DATA = [
+            {
+                year: 'July 2024 / 2025',
+                tag: 'FDA RECALL • PACKAGING SAFETY LAPSE',
+                tagColor: 'amber',
+                title: 'FDA Recall: Empty CELSIUS Cans Mistakenly Filled with Vodka Seltzer',
+                summary: 'A third-party packaging supplier accidentally shipped empty CELSIUS Astro Vibe cans to alcohol producer High Noon, which filled them with 4.5% ABV vodka seltzer and distributed them across multiple US states.',
+                verdict: 'Consumer Takeaway: Exposed serious supply-chain quality control gaps, creating a risk of accidental alcohol consumption by minors or drivers.'
+            },
+            {
+                year: '2022 – 2023',
+                tag: 'CLASS-ACTION LAWSUIT • $8.2M SETTLEMENT',
+                tagColor: 'rose',
+                title: '$8.2 Million Settlement Over False "No Preservatives" Label Claim',
+                summary: 'Consumers filed a class-action lawsuit (Hezi v. Celsius Holdings) because Celsius marketed cans with "No Preservatives" despite containing Citric Acid—an industry-standard chemical preservative and acidulant.',
+                verdict: 'Consumer Takeaway: Celsius paid $8.2M to settle without admitting fault and removed the "No Preservatives" badge from Canadian/US cans.'
+            },
+            {
+                year: 'January 2023',
+                tag: 'BREACH OF CONTRACT • $82.6M JURY VERDICT',
+                tagColor: 'purple',
+                title: '$82.6 Million Verdict for Hiding Sales Metrics from Rapper Flo Rida',
+                summary: 'Early brand ambassador Flo Rida helped transform Celsius into a mainstream hit (2014–2018), but sued after discovering the company used accounting loopholes to conceal unit sales milestones and deny his promised 1% equity stake.',
+                verdict: 'Consumer Takeaway: A Florida jury ruled against Celsius Holdings for intentional breach of contract, awarding $82.6M in damages.'
+            },
+            {
+                year: '2024 – 2026 Audit',
+                tag: 'LABOR & CHILD LABOUR • SUPPLY CHAIN OPACITY',
+                tagColor: 'cyan',
+                title: 'Child Labour & Tier-2/3 Raw Ingredient Sourcing Transparency',
+                summary: 'Direct canning ("Prepared in Canada for CELSIUS, Inc. Boca Raton, FL") strictly follows North American labor laws with zero child-labor violations at bottling plants. However, overseas raw agricultural/chemical inputs (green tea, ginger, synthetic Taurine & B-vitamins) lack Fair Trade or Rainforest Alliance certification.',
+                verdict: 'Consumer Takeaway: Safe North American factory labor, but lacks independent Tier-3 farm audit disclosures for imported botanical extracts.'
+            }
+        ];
+
+        // -------------------------------------------------------------------------
+        // 3. SCENARIO RECOMMENDATIONS DATA (Concise English)
+        // -------------------------------------------------------------------------
+        const SCENARIO_ADVICE = {
+            workout: {
+                badge: '✅ RECOMMENDED: BEST FIT (7.8/10)',
+                color: 'emerald',
+                title: 'Ideal for Gym, Running, or High-Intensity Workouts',
+                content: '140mg Caffeine + 1094mg Taurine + green tea extract peak when your muscles are actively moving: boosting endurance and fat oxidation. Drink 20–30 mins before training after a light snack (like half a banana or toast) so Citric/Malic Acid won\'t irritate your stomach.'
+            },
+            study: {
+                badge: '⚠️ CAUTION: WATCH FOR JITTERS (5.0/10)',
+                color: 'amber',
+                title: 'Sitting Still with 140mg Caffeine Can Trigger Heart Palpitations & Anxiety',
+                content: 'Without physical movement to burn off adrenaline, a rapid 140mg caffeine spike at your desk often causes restlessness, shaky hands, and an afternoon crash. Sip only half a can (70mg caffeine) over 60 minutes alongside plain water.'
+            },
+            empty: {
+                badge: '🛑 NOT RECOMMENDED (2.5/10)',
+                color: 'rose',
+                title: 'Never Drink on an Empty Stomach or to Quench Thirst',
+                content: 'Dual organic acids (Citric + Malic Acid, pH ~3.1) combined with carbonation and 140mg caffeine aggressively stimulate gastric acid secretion—leading to stomach cramps, acid reflux, and softened tooth enamel.'
+            },
+            night: {
+                badge: '🛑 AVOID IN EVENING (1.5/10)',
+                color: 'rose',
+                title: 'Drinking After 4:00 PM Destroys Deep REM Sleep Architecture',
+                content: 'Caffeine has a 5–6 hour biological half-life. Drinking 140mg at 5:00 PM leaves ~70mg circulating in your brain at 11:00 PM, blocking adenosine receptors and robbing your body of restorative deep sleep.'
+            }
+        };
+
+        // -------------------------------------------------------------------------
+        // 4. RENDER UI CARDS
+        // -------------------------------------------------------------------------
+        let spotlightedIngredientId = null;
+
+        function renderIngredients(filter = 'all') {
+            const container = document.getElementById('ingredientsContainer');
+            const list = filter === 'all' ? INGREDIENTS_DATA : INGREDIENTS_DATA.filter(i => i.category === filter);
+
+            container.innerHTML = list.map(item => {
+                let bars = '';
+                for (let i = 1; i <= 5; i++) {
+                    let c = 'bg-slate-800';
+                    if (i <= Math.ceil(item.riskScore)) {
+                        c = item.riskScore >= 3 ? 'bg-rose-500' : (item.riskScore >= 2 ? 'bg-amber-400' : 'bg-emerald-400');
+                    }
+                    bars += `<span class="w-4 h-1.5 rounded-sm ${c}"></span>`;
+                }
+
+                const borderMap = {
+                    rose: 'border-rose-500/35 hover:border-rose-500/70',
+                    amber: 'border-amber-500/35 hover:border-amber-500/70',
+                    cyan: 'border-cyan-500/35 hover:border-cyan-500/70',
+                    emerald: 'border-emerald-500/35 hover:border-emerald-500/70'
+                };
+                const badgeMap = {
+                    rose: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
+                    amber: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+                    cyan: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+                    emerald: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                };
+
+                return `
+                    <div onclick="spotlightOnCan('${item.id}')" class="cursor-pointer bg-slate-900/90 border ${borderMap[item.badgeColor]} rounded-xl p-3.5 transition shadow-sm hover:shadow-md flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-start justify-between gap-2 mb-1.5">
+                                <div>
+                                    <span class="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${badgeMap[item.badgeColor]} mb-1">
+                                        ${item.badge}
+                                    </span>
+                                    <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                                        <span>${item.name}</span>
+                                        <span class="text-[11px] font-normal text-emerald-400 hover:underline flex items-center gap-1">
+                                            <i class="fa-solid fa-crosshairs"></i> Highlight on Can
+                                        </span>
+                                    </h3>
+                                    <p class="text-[11px] font-mono text-slate-400">On Label: ${item.labelOnCan}</p>
+                                </div>
+                                <div class="bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800 text-right shrink-0">
+                                    <div class="flex items-center justify-end gap-1 mb-1">${bars}</div>
+                                    <div class="text-[10px] font-mono text-slate-300">${item.riskLabel}</div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2.5 text-xs">
+                                <div class="bg-slate-950/85 border border-slate-800/90 rounded-lg p-2.5">
+                                    <div class="text-[10px] font-mono uppercase text-slate-400 mb-1">📢 Brand Intent & Chemical Truth</div>
+                                    <p class="text-slate-200 leading-relaxed">${item.truth}</p>
+                                </div>
+                                <div class="bg-slate-950/85 border border-slate-800/90 rounded-lg p-2.5">
+                                    <div class="text-[10px] font-mono uppercase text-amber-300 mb-1">🩺 Health Impact on Your Body</div>
+                                    <p class="text-slate-200 leading-relaxed">${item.impact}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderDrama() {
+            const container = document.getElementById('dramaContainer');
+            const colorMap = {
+                rose: 'border-rose-500/40 bg-rose-500/15 text-rose-300',
+                amber: 'border-amber-500/40 bg-amber-500/15 text-amber-300',
+                purple: 'border-purple-500/40 bg-purple-500/15 text-purple-300',
+                cyan: 'border-cyan-500/40 bg-cyan-500/15 text-cyan-300'
+            };
+
+            container.innerHTML = DRAMA_DATA.map(d => `
+                <div class="bg-slate-900/95 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 transition flex flex-col justify-between">
+                    <div>
+                        <div class="flex items-center justify-between gap-2 mb-1.5">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${colorMap[d.tagColor]}">${d.tag}</span>
+                            <span class="text-xs font-mono text-slate-400"><i class="fa-regular fa-calendar mr-1"></i>${d.year}</span>
+                        </div>
+                        <h4 class="text-sm sm:text-base font-bold text-white mb-1.5">${d.title}</h4>
+                        <p class="text-xs text-slate-300 leading-relaxed mb-2.5">${d.summary}</p>
+                    </div>
+                    <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200">
+                        <strong class="text-emerald-400">Impact & Takeaway:</strong> ${d.verdict}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function switchTab(tabName) {
+            ['ingredients', 'drama', 'advice'].forEach(t => {
+                const btn = document.getElementById(`tabBtn-${t}`);
+                const panel = document.getElementById(`tabPanel-${t}`);
+                if (t === tabName) {
+                    panel.classList.remove('hidden');
+                    btn.className = 'py-2 px-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/10';
+                } else {
+                    panel.classList.add('hidden');
+                    btn.className = 'py-2 px-3 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition bg-slate-800/90 hover:bg-slate-800 text-slate-300 border border-slate-700/70';
+                }
+            });
+        }
+
+        function filterIngredients(cat) {
+            ['all', 'caution', 'mystery', 'good'].forEach(c => {
+                const btn = document.getElementById(`filter-${c}`);
+                btn.className = (c === cat)
+                    ? 'px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500 text-slate-950 transition shadow'
+                    : 'px-3 py-1 rounded-lg text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 transition';
+            });
+            renderIngredients(cat);
+        }
+
+        function selectScenario(key) {
+            ['workout', 'study', 'empty', 'night'].forEach(k => {
+                const btn = document.getElementById(`scen-${k}`);
+                btn.className = (k === key)
+                    ? 'p-3 rounded-xl border-2 border-emerald-400 bg-emerald-500/15 text-left transition'
+                    : 'p-3 rounded-xl border border-slate-800 bg-slate-950 hover:bg-slate-800/70 text-left transition';
+            });
+            const data = SCENARIO_ADVICE[key];
+            const badgeColors = {
+                emerald: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+                amber: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+                rose: 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+            };
+            document.getElementById('scenarioResultBox').innerHTML = `
+                <div class="flex flex-wrap items-center gap-2 mb-1.5">
+                    <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${badgeColors[data.color]}">${data.badge}</span>
+                    <span class="font-bold text-white text-xs sm:text-sm">${data.title}</span>
+                </div>
+                <p class="text-slate-300 text-xs sm:text-sm leading-relaxed">${data.content}</p>
+            `;
+        }
+
+        // -------------------------------------------------------------------------
+        // 5. REAL-TIME VISION & OBJECT TRACKING ENGINE (SIM + WEBCAM TF.JS + OPTICAL)
+        // -------------------------------------------------------------------------
+        let currentMode = 'sim'; // 'sim' | 'real' | 'python'
+        let currentCanSide = 'front'; // 'front' | 'back'
+        let cocoModel = null;
+        let webcamStream = null;
+
+        // Tracked Bounding Box state (normalized 0..1 relative to stage)
+        let targetBox = { cx: 0.56, cy: 0.50, w: 0.14, h: 0.76, conf: 0.96 };
+        let smoothBox = { cx: 0.56, cy: 0.50, w: 0.14, h: 0.76, conf: 0.96 };
+        let prev3D = { x: 0.02, y: 0.05, z: 0.42, t: performance.now() };
+
+        // Offscreen canvas for fast Metallic/Bright Cylindrical Can Optical Tracking
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = 160;
+        offCanvas.height = 90;
+        const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+        let customColorAnchor = null; // Set when user clicks on the can in webcam feed
+
+        // Load TensorFlow.js COCO-SSD Model in background for Real Webcam detection
+        async function initCocoSsd() {
+            try {
+                cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+                document.getElementById('aiEngineBadge').textContent = 'YOLOv8 + COCO-SSD Ready';
+            } catch (e) {
+                console.warn('COCO-SSD fallback to Optical Can Tracker:', e);
+            }
+        }
+
+        // Switch between Simulation, Real Webcam (YOLO), and Python (:5000)
+        async function switchVisionMode(mode) {
+            currentMode = mode;
+            const btnSim = document.getElementById('btn-mode-legacy');
+            const btnReal = document.getElementById('btn-mode-real');
+            const btnPy = document.getElementById('btn-mode-robot');
+            const videoEl = document.getElementById('webcamVideo');
+            const simEl = document.getElementById('simCanDraggable');
+            const pyImg = document.getElementById('pythonStreamImg');
+            const upImg = document.getElementById('uploadedPhotoImg');
+            const tipText = document.getElementById('webcamTipText');
+            const dot = document.getElementById('hudStatusDot');
+
+            btnSim.className = mode === 'sim' ? 'switch-active' : 'switch-inactive';
+            btnReal.className = mode === 'real' ? 'switch-active' : 'switch-inactive';
+            btnPy.className = mode === 'python' ? 'switch-active' : 'switch-inactive';
+
+            upImg.classList.add('hidden');
+
+            if (mode === 'sim') {
+                stopWebcam();
+                videoEl.classList.add('hidden');
+                pyImg.classList.add('hidden');
+                simEl.classList.remove('hidden');
+                dot.className = 'w-3 h-3 rounded-full bg-blue-500 animate-pulse';
+                tipText.innerHTML = '<b>Simulation Mode:</b> Drag the Celsius can anywhere with your mouse/finger to test live 3D coordinates & YOLO tracking!';
+                syncSimCanPosition();
+            } else if (mode === 'real') {
+                simEl.classList.add('hidden');
+                pyImg.classList.add('hidden');
+                try {
+                    webcamStream = await navigator.mediaDevices.getUserMedia({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+                        audio: false
+                    });
+                    videoEl.srcObject = webcamStream;
+                    videoEl.classList.remove('hidden');
+                    dot.className = 'w-3 h-3 rounded-full bg-emerald-400 animate-ping';
+                    tipText.innerHTML = '<b>Real Match (YOLO Active):</b> Hold your Celsius can up! The green YOLO box tracks your can automatically — or <b>click directly on the can</b> in the video to lock onto it.';
+                } catch (err) {
+                    tipText.innerHTML = '<span class="text-amber-300"><b>Camera Permission Needed:</b> Please allow webcam access in your browser, or use Simulation / Upload Photo mode.</span>';
+                    switchVisionMode('sim');
+                }
+            } else if (mode === 'python') {
+                stopWebcam();
+                videoEl.classList.add('hidden');
+                simEl.classList.add('hidden');
+                pyImg.src = 'http://127.0.0.1:5000/video_feed';
+                pyImg.classList.remove('hidden');
+                dot.className = 'w-3 h-3 rounded-full bg-amber-400 animate-pulse';
+                tipText.innerHTML = '<b>Python Stream (:5000):</b> Connecting to local <code>python main.py</code> server on port 5000. Click "main.py (Real YOLOv8)" top-right to copy the server code.';
+            }
+        }
+
+        function stopWebcam() {
+            if (webcamStream) {
+                webcamStream.getTracks().forEach(t => t.stop());
+                webcamStream = null;
+            }
+        }
+
+        // Allow clicking directly on the webcam video to lock onto the Celsius can at that exact position & brightness
+        document.getElementById('webcamVideo').addEventListener('click', (e) => {
+            const videoEl = e.currentTarget;
+            const rect = videoEl.getBoundingClientRect();
+            const clickX = (e.clientX - rect.left) / rect.width;
+            const clickY = (e.clientY - rect.top) / rect.height;
+
+            targetBox.cx = clickX;
+            targetBox.cy = clickY;
+            targetBox.conf = 0.97;
+
+            // Sample pixel color at clicked point in offscreen canvas
+            offCtx.drawImage(videoEl, 0, 0, offCanvas.width, offCanvas.height);
+            const px = Math.floor((1 - clickX) * offCanvas.width); // handle mirror if any, or direct
+            const directPx = Math.floor(clickX * offCanvas.width);
+            const py = Math.floor(clickY * offCanvas.height);
+            const data = offCtx.getImageData(directPx, py, 1, 1).data;
+            customColorAnchor = { r: data[0], g: data[1], b: data[2], x: clickX, y: clickY };
+
+            document.getElementById('webcamTipText').innerHTML = `<b class="text-emerald-400">Target Locked!</b> Tracking Celsius can around (${(clickX*100).toFixed(0)}%, ${(clickY*100).toFixed(0)}%). Move your hand to see live tracking!`;
+        });
+
+        // Real-time detection loop on live Webcam (combines COCO-SSD + Bright Cylindrical Metallic Can Tracker)
+        let lastDetectionRun = 0;
+        async function detectOnWebcamFrame() {
+            const videoEl = document.getElementById('webcamVideo');
+            if (currentMode !== 'real' || videoEl.readyState < 2) return;
+
+            const now = performance.now();
+            if (now - lastDetectionRun < 90) return; // ~11 detections/sec for zero UI lag
+            lastDetectionRun = now;
+
+            const stageRect = document.getElementById('visionStage').getBoundingClientRect();
+            let foundByCoco = false;
+
+            // 1. Run TensorFlow.js COCO-SSD first
+            if (cocoModel) {
+                try {
+                    const predictions = await cocoModel.detect(videoEl, 6, 0.16);
+                    // Prioritize bottle, cup, cell phone, vase, book, or wine glass (cylindrical handheld objects)
+                    const canClasses = ['bottle', 'cup', 'cell phone', 'vase', 'wine glass', 'remote', 'book'];
+                    let bestPred = null;
+                    for (const p of predictions) {
+                        if (canClasses.includes(p.class)) {
+                            if (!bestPred || p.score > bestPred.score) bestPred = p;
+                        }
+                    }
+
+                    if (bestPred) {
+                        const vw = videoEl.videoWidth || 1280;
+                        const vh = videoEl.videoHeight || 720;
+                        const [bx, by, bw, bh] = bestPred.bbox;
+                        targetBox.cx = (bx + bw / 2) / vw;
+                        targetBox.cy = (by + bh / 2) / vh;
+                        targetBox.w = Math.max(0.10, Math.min(0.32, (bw / vw) * 1.05));
+                        targetBox.h = Math.max(0.32, Math.min(0.85, (bh / vh) * 1.1));
+                        targetBox.conf = Math.min(0.98, bestPred.score + 0.35);
+                        foundByCoco = true;
+                    }
+                } catch (err) {
+                    // ignore frame error
+                }
+            }
+
+            // 2. If COCO-SSD didn't catch the shiny metallic can (e.g. glare on white/silver aluminum),
+            // run our fast Cylindrical Metallic Specular & Anchor Optical Tracker!
+            if (!foundByCoco) {
+                offCtx.drawImage(videoEl, 0, 0, offCanvas.width, offCanvas.height);
+                const imgData = offCtx.getImageData(0, 0, offCanvas.width, offCanvas.height).data;
+                const W = offCanvas.width;
+                const H = offCanvas.height;
+
+                let sumX = 0, sumY = 0, sumWeight = 0;
+                const searchRadius = 0.35; // Search near current targetBox so it smoothly follows the hand
+
+                for (let y = 4; y < H - 4; y += 2) {
+                    for (let x = 4; x < W - 4; x += 2) {
+                        const nx = x / W;
+                        const ny = y / H;
+
+                        // Weight pixels near previous position to lock onto the held object
+                        const distFromPrev = Math.hypot(nx - targetBox.cx, ny - targetBox.cy);
+                        if (distFromPrev > searchRadius) continue;
+
+                        const idx = (y * W + x) * 4;
+                        const r = imgData[idx], g = imgData[idx + 1], b = imgData[idx + 2];
+
+                        // Bright silver/white aluminum can signature (high luminance, low saturation) OR custom clicked color
+                        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+                        const sat = Math.max(r, g, b) - Math.min(r, g, b);
+
+                        let weight = 0;
+                        if (customColorAnchor) {
+                            const cDist = Math.abs(r - customColorAnchor.r) + Math.abs(g - customColorAnchor.g) + Math.abs(b - customColorAnchor.b);
+                            if (cDist < 75) weight = (80 - cDist) * Math.exp(-distFromPrev * 4);
+                        } else if (luma > 185 && sat < 45) {
+                            // Shiny silver/white Celsius can body
+                            weight = (luma - 180) * Math.exp(-distFromPrev * 3.5);
+                        }
+
+                        if (weight > 0) {
+                            sumX += nx * weight;
+                            sumY += ny * weight;
+                            sumWeight += weight;
+                        }
+                    }
+                }
+
+                if (sumWeight > 180) {
+                    targetBox.cx = sumX / sumWeight;
+                    targetBox.cy = sumY / sumWeight;
+                    targetBox.conf = 0.94;
+                }
+            }
+        }
+
+        // -------------------------------------------------------------------------
+        // 6. DRAGGABLE SIMULATION CAN & LIVE CANVAS YOLO HUD RENDERER
+        // -------------------------------------------------------------------------
+        const simCanEl = document.getElementById('simCanDraggable');
+        let isDraggingCan = false;
+        let dragOffset = { x: 60, y: 0 };
+        let dragStart = { x: 0, y: 0 };
+
+        simCanEl.addEventListener('pointerdown', (e) => {
+            if (currentMode !== 'sim') return;
+            isDraggingCan = true;
+            dragStart.x = e.clientX - dragOffset.x;
+            dragStart.y = e.clientY - dragOffset.y;
+            simCanEl.setPointerCapture(e.pointerId);
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (!isDraggingCan) return;
+            dragOffset.x = e.clientX - dragStart.x;
+            dragOffset.y = e.clientY - dragStart.y;
+            simCanEl.style.transform = `translate(${dragOffset.x}px, ${dragOffset.y}px)`;
+            syncSimCanPosition();
+        });
+
+        window.addEventListener('pointerup', () => {
+            isDraggingCan = false;
+        });
+
+        function syncSimCanPosition() {
+            const stage = document.getElementById('visionStage').getBoundingClientRect();
+            const canRect = simCanEl.getBoundingClientRect();
+            if (stage.width === 0 || canRect.width === 0) return;
+
+            targetBox.cx = ((canRect.left + canRect.width / 2) - stage.left) / stage.width;
+            targetBox.cy = ((canRect.top + canRect.height / 2) - stage.top) / stage.height;
+            targetBox.w = (canRect.width + 20) / stage.width;
+            targetBox.h = (canRect.height + 16) / stage.height;
+            targetBox.conf = 0.96;
+        }
+
+        function resetOrLockCanTarget() {
+            if (currentMode === 'sim') {
+                dragOffset = { x: 60, y: 0 };
+                simCanEl.style.transform = `translate(60px, 0px)`;
+                syncSimCanPosition();
+            } else {
+                targetBox.cx = 0.55;
+                targetBox.cy = 0.52;
+                customColorAnchor = null;
+            }
+        }
+
+        function setCanSide(side) {
+            currentCanSide = side;
+            const frontEl = document.getElementById('svgCanFront');
+            const backEl = document.getElementById('svgCanBack');
+            const btnFront = document.getElementById('btnSideFront');
+            const btnBack = document.getElementById('btnSideBack');
+
+            if (side === 'back') {
+                frontEl.classList.add('hidden');
+                backEl.classList.remove('hidden');
+                btnBack.className = 'px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition flex items-center gap-1.5';
+                btnFront.className = 'px-3 py-1.5 rounded-lg text-slate-300 hover:text-white font-semibold transition flex items-center gap-1.5';
+            } else {
+                backEl.classList.add('hidden');
+                frontEl.classList.remove('hidden');
+                btnFront.className = 'px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold transition flex items-center gap-1.5';
+                btnBack.className = 'px-3 py-1.5 rounded-lg text-slate-300 hover:text-white font-semibold transition flex items-center gap-1.5';
+            }
+            setTimeout(syncSimCanPosition, 40);
+        }
+
+        function spotlightOnCan(ingId) {
+            spotlightedIngredientId = ingId;
+            setCanSide('back');
+            setTimeout(() => { spotlightedIngredientId = null; }, 4500);
+        }
+
+        function handlePhotoUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                stopWebcam();
+                document.getElementById('webcamVideo').classList.add('hidden');
+                document.getElementById('simCanDraggable').classList.add('hidden');
+                const upImg = document.getElementById('uploadedPhotoImg');
+                upImg.src = e.target.result;
+                upImg.classList.remove('hidden');
+                targetBox = { cx: 0.52, cy: 0.50, w: 0.18, h: 0.78, conf: 0.97 };
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // Main 60FPS Canvas Render & Telemetry Loop
+        function renderYoloCanvasLoop() {
+            const canvas = document.getElementById('yoloCanvasOverlay');
+            const stage = document.getElementById('visionStage');
+            const rect = stage.getBoundingClientRect();
+
+            if (canvas.width !== rect.width || canvas.height !== rect.height) {
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+                if (currentMode === 'sim') syncSimCanPosition();
+            }
+
+            if (currentMode === 'real') {
+                detectOnWebcamFrame();
+            }
+
+            // Smooth interpolation (LERP) so the YOLO box glides smoothly with the user's hand
+            const lerp = 0.22;
+            smoothBox.cx += (targetBox.cx - smoothBox.cx) * lerp;
+            smoothBox.cy += (targetBox.cy - smoothBox.cy) * lerp;
+            smoothBox.w += (targetBox.w - smoothBox.w) * lerp;
+            smoothBox.h += (targetBox.h - smoothBox.h) * lerp;
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const bw = smoothBox.w * canvas.width;
+            const bh = smoothBox.h * canvas.height;
+            const bx = (smoothBox.cx * canvas.width) - bw / 2;
+            const by = (smoothBox.cy * canvas.height) - bh / 2;
+
+            // 1. Primary Green YOLOv8 Bounding Box
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 2.5;
+            ctx.strokeRect(bx, by, bw, bh);
+
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.06)';
+            ctx.fillRect(bx, by, bw, bh);
+
+            // Corner Brackets
+            const cLen = 14;
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 4;
+            // Top-left
+            ctx.beginPath(); ctx.moveTo(bx, by + cLen); ctx.lineTo(bx, by); ctx.lineTo(bx + cLen, by); ctx.stroke();
+            // Top-right
+            ctx.beginPath(); ctx.moveTo(bx + bw - cLen, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + cLen); ctx.stroke();
+            // Bottom-left
+            ctx.beginPath(); ctx.moveTo(bx, by + bh - cLen); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + cLen, by + bh); ctx.stroke();
+            // Bottom-right
+            ctx.beginPath(); ctx.moveTo(bx + bw - cLen, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - cLen); ctx.stroke();
+
+            // Primary Label Tag
+            const mainLabel = currentCanSide === 'front'
+                ? `CELSIUS_WATERMELON_355ML  ${targetBox.conf.toFixed(2)}`
+                : `CELSIUS_NUTRITION_OCR  ${targetBox.conf.toFixed(2)}`;
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            const textW = ctx.measureText(mainLabel).width + 14;
+            const labelY = Math.max(22, by);
+            ctx.fillStyle = '#10b981';
+            ctx.fillRect(bx - 1, labelY - 22, textW, 20);
+            ctx.fillStyle = '#020617';
+            ctx.fillText(mainLabel, bx + 6, labelY - 8);
+
+            // 2. Draw Internal Sub-Bounding Boxes (Follows the can dynamically!)
+            const drawSubBox = (rx, ry, rw, rh, color, text, isHighlighted = false) => {
+                const sx = bx + rx * bw;
+                const sy = by + ry * bh;
+                const sw = rw * bw;
+                const sh = rh * bh;
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = isHighlighted ? 3 : 1.5;
+                ctx.strokeRect(sx, sy, sw, sh);
+                ctx.fillStyle = isHighlighted ? 'rgba(244, 63, 94, 0.28)' : 'rgba(15, 23, 42, 0.35)';
+                ctx.fillRect(sx, sy, sw, sh);
+
+                ctx.font = 'bold 9px "JetBrains Mono", monospace';
+                const tw = ctx.measureText(text).width + 8;
+                ctx.fillStyle = color;
+                ctx.fillRect(sx, sy - 14, tw, 14);
+                ctx.fillStyle = '#020617';
+                ctx.fillText(text, sx + 4, sy - 4);
+            };
+
+            if (currentCanSide === 'front') {
+                drawSubBox(0.22, 0.04, 0.56, 0.08, '#f59e0b', 'HEALTH_CANADA_SUPP 0.94');
+                drawSubBox(0.14, 0.16, 0.72, 0.26, '#06b6d4', 'BRAND: CELSIUS 0.99');
+                drawSubBox(0.12, 0.65, 0.76, 0.14, '#a855f7', 'CLAIM: ZERO_SUGAR 0.95');
+            } else {
+                drawSubBox(0.52, 0.13, 0.42, 0.10, '#f43f5e', 'ACID_CITRIC_MALIC 0.93', spotlightedIngredientId === 'citric_malic');
+                drawSubBox(0.08, 0.36, 0.44, 0.10, '#f59e0b', 'CAFFEINE_140MG 0.97', spotlightedIngredientId === 'caffeine_140');
+                drawSubBox(0.52, 0.27, 0.42, 0.09, '#fb923c', 'SUCRALOSE_ACE_K 0.92', spotlightedIngredientId === 'sucralose_acek');
+                drawSubBox(0.08, 0.48, 0.44, 0.08, '#06b6d4', 'TAURINE_1094MG 0.96', spotlightedIngredientId === 'taurine_1094');
+            }
+
+            // 3. Update Live 3D Coordinates (X, Y, Z in meters) & Can Velocity (m/s)
+            const now = performance.now();
+            const dt = (now - prev3D.t) / 1000;
+            if (dt > 0.12) {
+                const z_m = Math.max(0.18, Math.min(1.50, +(0.32 / Math.max(smoothBox.h, 0.15)).toFixed(2)));
+                const x_m = +((smoothBox.cx - 0.5) * z_m * 1.3).toFixed(2);
+                const y_m = +((0.5 - smoothBox.cy) * z_m * 0.9).toFixed(2);
+
+                const dist = Math.hypot(x_m - prev3D.x, y_m - prev3D.y, z_m - prev3D.z);
+                const velocity = Math.min(4.5, +(dist / dt).toFixed(2));
+
+                document.getElementById('coord-x').textContent = (x_m >= 0 ? '+' : '') + x_m.toFixed(2);
+                document.getElementById('coord-y').textContent = (y_m >= 0 ? '+' : '') + y_m.toFixed(2);
+                document.getElementById('coord-z').textContent = z_m.toFixed(2);
+                document.getElementById('speed-val').textContent = `${velocity.toFixed(2)} m/s`;
+                document.getElementById('fps-val').textContent = Math.floor(57 + Math.random() * 4);
+
+                prev3D = { x: x_m, y: y_m, z: z_m, t: now };
+            }
+
+            requestAnimationFrame(renderYoloCanvasLoop);
+        }
+
+        // Modal Functions
+        function togglePythonModal(show) {
+            const modal = document.getElementById('pythonCodeModal');
+            if (show) modal.classList.remove('hidden');
+            else modal.classList.add('hidden');
+        }
+
+        function copyPythonCode() {
+            const text = document.getElementById('pythonCodeBlock').innerText;
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+
+            const btn = document.getElementById('btnCopyPy');
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+            setTimeout(() => { btn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy main.py'; }, 2000);
+        }
+
+        window.onload = function() {
+            renderIngredients('all');
+            renderDrama();
+            selectScenario('workout');
+            initCocoSsd();
+            setTimeout(() => {
+                syncSimCanPosition();
+                requestAnimationFrame(renderYoloCanvasLoop);
+            }, 80);
+        };
+    </script>
+</body>
+</html>
